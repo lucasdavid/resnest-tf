@@ -1,0 +1,14 @@
+{
+    "files.watcherExclude": {
+        "**/data/**": true,
+        "**/logs/**": true,
+        "**/build/**": true
+    },
+    "editor.tabSize": 2,
+    "python.formatting.provider": "yapf",
+    "python.testing.pytestArgs": [
+        "resnest"
+    ],
+    "python.testing.unittestEnabled": false,
+    "python.testing.pytestEnabled": true
+}

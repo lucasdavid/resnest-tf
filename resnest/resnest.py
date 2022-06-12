@@ -1,142 +1,181 @@
+from collections import OrderedDict
+from typing import List, Optional, Tuple
+
 import tensorflow as tf
 
 from .resnet import ResNet
 
-#_url_format = 'https://s3.us-west-1.wasabisys.com/resnest/torch/{}-{}.pth'
-_url_format = 'https://github.com/zhanghang1989/ResNeSt/releases/download/weights_step1/{}-{}.pth'
 
-_model_sha256 = {name: checksum for checksum, name in [
-    ('528c19ca', 'resnest50'),
-    ('22405ba7', 'resnest101'),
-    ('75117900', 'resnest200'),
-    ('0cc87c48', 'resnest269'),
-    ]}
-
-def short_hash(name):
-    if name not in _model_sha256:
-        raise ValueError('Pretrained model for {name} is not available.'.format(name=name))
-    return _model_sha256[name][:8]
-
-resnest_model_urls = {name: _url_format.format(name, short_hash(name)) for
-    name in _model_sha256.keys()
-}
-
-def load_weight(keras_model, torch_url, group_size = 2):
-    """
-    https://s3.us-west-1.wasabisys.com/resnest/torch/resnest50-528c19ca.pth > https://github.com/zhanghang1989/ResNeSt/releases/download/weights_step1/resnest50-528c19ca.pth
-    https://s3.us-west-1.wasabisys.com/resnest/torch/resnest101-22405ba7.pth > https://github.com/zhanghang1989/ResNeSt/releases/download/weights_step1/resnest101-22405ba7.pth
-    https://s3.us-west-1.wasabisys.com/resnest/torch/resnest200-75117900.pth > https://github.com/zhanghang1989/ResNeSt/releases/download/weights_step1/resnest200-75117900.pth
-    https://s3.us-west-1.wasabisys.com/resnest/torch/resnest269-0cc87c48.pth > https://github.com/zhanghang1989/ResNeSt/releases/download/weights_step1/resnest269-0cc87c48.pth
-    """
-    try:
-        import torch
-        torch_weight = torch.hub.load_state_dict_from_url(torch_url, map_location = "cpu", progress = True, check_hash = True)
-    except:
-        print("If you want to use 'ResNeSt Weight', please install 'torch 1.1▲'")
-        return keras_model
-    
-    weight = {}
-    for k, v in dict(torch_weight).items():
-        if k.split(".")[-1] in ["weight", "bias", "running_mean", "running_var"]:
-            if ("downsample" in k or "conv" in k) and "weight" in k and v.ndim == 4:
-                v = v.permute(2, 3, 1, 0)
-            elif "fc.weight" in k:
-                v = v.t()
-            weight[k] = v.cpu().data.numpy()
-    
-    g = 0
-    downsample = []
-    keras_weight = []
-    for i, (torch_name, torch_weight) in enumerate(weight.items()):
-        if i + g < len(keras_model.weights):
-            keras_name = keras_model.weights[i + g].name
-            if "downsample" in torch_name:
-                downsample.append(torch_weight)
-                continue
-            elif "group" in keras_name:
-                g += (group_size - 1)
-                torch_weight = tf.split(torch_weight, group_size, axis = -1)
-            else:
-                torch_weight = [torch_weight]
-            keras_weight += torch_weight
-    
-    for w in keras_model.weights:
-        if "downsample" in w.name:
-            new_w = downsample.pop(0)
-        else:
-            new_w = keras_weight.pop(0)
-        tf.keras.backend.set_value(w, new_w)
-    return keras_model
-    
-def resnest50(input_tensor = None, input_shape = None, classes = 1000, include_top = True, weights = "imagenet"):
+def _build_input_tensor(input_tensor, input_shape):
     if input_tensor is None:
-        img_input = tf.keras.layers.Input(shape = input_shape)
-    else:
-        if not tf.keras.backend.is_keras_tensor(input_tensor):
-            img_input = tf.keras.layers.Input(tensor = input_tensor, shape = input_shape)
-        else:
-            img_input = input_tensor
-    
-    out = ResNet(img_input, [3, 4, 6, 3], classes, include_top, radix = 2, group_size = 1, block_width = 64, stem_width = 32, deep_stem = True, avg_down = True, avd = True, avd_first = False)
-    model = tf.keras.Model(img_input, out)
-    
-    if weights == "imagenet":
-        load_weight(model, resnest_model_urls["resnest50"], group_size = 2 * 1)
-    elif weights is not None:
-        model.load_weights(weights)
-    return model
-    
+        return tf.keras.layers.Input(shape=input_shape)
+    if not tf.keras.backend.is_keras_tensor(input_tensor):
+        return tf.keras.layers.Input(tensor=input_tensor, shape=input_shape)
+    return input_tensor
 
-def resnest101(input_tensor = None, input_shape = None, classes = 1000, include_top = True, weights = "imagenet"):
-    if input_tensor is None:
-        img_input = tf.keras.layers.Input(shape = input_shape)
-    else:
-        if not tf.keras.backend.is_keras_tensor(input_tensor):
-            img_input = tf.keras.layers.Input(tensor = input_tensor, shape = input_shape)
-        else:
-            img_input = input_tensor
-    
-    out = ResNet(img_input, [3, 4, 23, 3], classes, include_top, radix = 2, group_size = 1, block_width = 64, stem_width = 64, deep_stem = True, avg_down = True, avd = True, avd_first = False)
-    model = tf.keras.Model(img_input, out)
-    
-    if weights == "imagenet":
-        load_weight(model, resnest_model_urls["resnest101"], group_size = 2 * 1)
-    elif weights is not None:
-        model.load_weights(weights)
+
+def ResNeSt(
+    weights_id: str,
+    blocks: List[int],
+    radix: int = 2,
+    group_size: int = 1,
+    block_width: int = 64,
+    stem_width: int = 64,
+    input_tensor: Optional[tf.keras.Input] = None,
+    input_shape: Optional[Tuple[int]] = None,
+    classes: int = 1000,
+    include_top: bool = True,
+    weights: str = "imagenet",
+    dropout_rate: float = 0,
+    dilation: int = 1,  # [1, 2, 4]
+    pooling: str = "avg",
+    classifier_activation: str = "softmax",
+    name: str = "resnest50",
+):
+    x = _build_input_tensor(input_tensor, input_shape)
+    y = ResNet(
+        x,
+        blocks,
+        classes,
+        include_top,
+        radix=radix,
+        group_size=group_size,
+        block_width=block_width,
+        stem_width=stem_width,
+        deep_stem=True,
+        avg_down=True,
+        avd=True,
+        avd_first=False,
+        dropout_rate=dropout_rate,
+        dilation=dilation,
+        pooling=pooling,
+        classifier_activation=classifier_activation,
+    )
+    model = tf.keras.Model(x, y, name=name)
+
+    # if weights == "imagenet":
+    #     _load_weights(model, WEIGHTS[weights_id])
+    # elif weights is not None:
+    #    model.load_weights(weights)
     return model
 
-def resnest200(input_tensor = None, input_shape = None, classes = 1000, include_top = True, weights = "imagenet"):
-    if input_tensor is None:
-        img_input = tf.keras.layers.Input(shape = input_shape)
-    else:
-        if not tf.keras.backend.is_keras_tensor(input_tensor):
-            img_input = tf.keras.layers.Input(tensor = input_tensor, shape = input_shape)
-        else:
-            img_input = input_tensor
-            
-    out = ResNet(img_input, [3, 24, 36, 3], classes, include_top, radix = 2, group_size = 1, block_width = 64, stem_width = 64, deep_stem = True, avg_down = True, avd = True, avd_first = False)
-    model = tf.keras.Model(img_input, out)
-    
-    if weights == "imagenet":
-        load_weight(model, resnest_model_urls["resnest200"], group_size = 2 * 1)
-    elif weights is not None:
-        model.load_weights(weights)
-    return model
 
-def resnest269(input_tensor = None, input_shape = None, classes = 1000, include_top = True, weights = "imagenet"):
-    if input_tensor is None:
-        img_input = tf.keras.layers.Input(shape = input_shape)
-    else:
-        if not tf.keras.backend.is_keras_tensor(input_tensor):
-            img_input = tf.keras.layers.Input(tensor = input_tensor, shape = input_shape)
-        else:
-            img_input = input_tensor
-            
-    out = ResNet(img_input, [3, 30, 48, 8], classes, include_top, radix = 2, group_size = 1, block_width = 64, stem_width = 64, deep_stem = True, avg_down = True, avd = True, avd_first = False)
-    model = tf.keras.Model(img_input, out)
-    
-    if weights == "imagenet":
-        load_weight(model, resnest_model_urls["resnest269"], group_size = 2 * 1)
-    elif weights is not None:
-        model.load_weights(weights)
-    return model
+def ResNeSt50(
+    input_tensor=None,
+    input_shape=None,
+    classes=1000,
+    include_top=True,
+    weights: str = "imagenet",
+    dropout_rate: float = 0,
+    dilation: int = 1,  # [1, 2, 4]
+    pooling: str = "avg",
+    classifier_activation: str = "softmax",
+    name: str = "resnest50",
+):
+    return ResNeSt(
+        "resnest50",
+        [3, 4, 6, 3],
+        stem_width=32,
+        input_tensor=input_tensor,
+        input_shape=input_shape,
+        classes=classes,
+        include_top=include_top,
+        weights=weights,
+        dropout_rate=dropout_rate,
+        dilation=dilation,
+        pooling=pooling,
+        classifier_activation=classifier_activation,
+        name=name,
+    )
+
+
+def ResNeSt101(
+    input_tensor=None,
+    input_shape=None,
+    classes=1000,
+    include_top=True,
+    weights="imagenet",
+    dropout_rate: float = 0,
+    dilation: int = 1,  # [1, 2, 4]
+    pooling: str = "avg",
+    classifier_activation: str = "softmax",
+    name: str = "resnest101",
+):
+    return ResNeSt(
+        "resnest101",
+        [3, 4, 23, 3],
+        input_tensor=input_tensor,
+        input_shape=input_shape,
+        classes=classes,
+        include_top=include_top,
+        weights=weights,
+        dropout_rate=dropout_rate,
+        dilation=dilation,
+        pooling=pooling,
+        classifier_activation=classifier_activation,
+        name=name,
+    )
+
+
+def ResNeSt200(
+    input_tensor=None,
+    input_shape=None,
+    classes=1000,
+    include_top=True,
+    weights="imagenet",
+    dropout_rate: float = 0,
+    dilation: int = 1,  # [1, 2, 4]
+    pooling: str = "avg",
+    classifier_activation: str = "softmax",
+    name: str = "resnest200",
+):
+    return ResNeSt(
+        "resnest101",
+        [3, 24, 36, 3],
+        input_tensor=input_tensor,
+        input_shape=input_shape,
+        classes=classes,
+        include_top=include_top,
+        weights=weights,
+        dropout_rate=dropout_rate,
+        dilation=dilation,
+        pooling=pooling,
+        classifier_activation=classifier_activation,
+        name=name,
+    )
+
+
+def ResNeSt269(
+    input_tensor=None,
+    input_shape=None,
+    classes=1000,
+    include_top=True,
+    weights="imagenet",
+    dropout_rate: float = 0.0,
+    dilation: int = 1,  # [1, 2, 4]
+    pooling: str = "avg",
+    classifier_activation: str = "softmax",
+    name: str = "resnest269",
+):
+    return ResNeSt(
+        "resnest269",
+        [3, 30, 48, 8],
+        input_tensor=input_tensor,
+        input_shape=input_shape,
+        classes=classes,
+        include_top=include_top,
+        weights=weights,
+        dropout_rate=dropout_rate,
+        dilation=dilation,
+        pooling=pooling,
+        classifier_activation=classifier_activation,
+        name=name,
+    )
+
+
+__all__ = [
+    "ResNeSt50",
+    "ResNeSt101",
+    "ResNeSt200",
+    "ResNeSt269",
+]
