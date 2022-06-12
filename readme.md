@@ -18,8 +18,20 @@ All networks were pre-trained over imagenet.
 import tensorflow as tf
 from resnest import ResNeSt101
 
-input_tensor = tf.keras.Input([512, 512, 3], name='inputs')
-model = resnest.ResNeSt101(input_tensor=input_tensor, weights='imagenet')
+# For classification (dilation=1):
+model = resnest.ResNeSt101(
+  input_shape=[512, 512, 3],
+  weights='imagenet'
+)
+
+# For segmentation (dilation in (2, 4)):
+model = resnest.ResNeSt101(
+  input_shape=[512, 512, 3],
+  weights='imagenet',
+  include_top=False,
+  pooling=None,
+  dilated=4
+)
 ```
 
 #### Preprocessing
