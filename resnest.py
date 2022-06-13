@@ -370,6 +370,24 @@ def ResNet(
   if not bn_args:
     bn_args = BN_DEFAULTS
 
+  if dilation == 1:
+    dilation = [1, 1]
+    stride_size = [2, 2]
+  elif dilation == 4:
+    dilation = [2, 4]
+    stride_size = [1, 1]
+  elif dilation == 2:
+    dilation = [1, 2]
+    stride_size = [2, 1]
+  elif isinstance(dilation, (list, tuple)) and len(dilation) == 2:
+    stride_size = [2 if d == 1 else 1 for d in dilation]
+  else:
+    raise ValueError(
+      f'Unknown value for dilation parameter {dilation}. Must be an integer '
+      'in `(1, 2, 4)` or a pair of integers representing (stage 3 dilation, '
+      'stage 4 dilation).'
+    )
+
   if deep_stem:
     y = Conv2D(stem_width, 3, strides=2, name="stem_conv1", **cv_args)(x)
     y = BatchNormalization(name="stem_bn1", **bn_args)(y)
@@ -419,24 +437,6 @@ def ResNet(
     expansion=expansion,
     stage=2,
   )
-
-  if dilation == 1:
-    dilation = [1, 1]
-    stride_size = [2, 2]
-  elif dilation == 4:
-    dilation = [2, 4]
-    stride_size = [1, 1]
-  elif dilation == 2:
-    dilation = [1, 2]
-    stride_size = [2, 1]
-  elif isinstance(dilation, (list, tuple)) and len(dilation) == 2:
-    stride_size = [2 if d == 1 else 1 for d in dilation]
-  else:
-    raise ValueError(
-      f'Unknown value for dilation parameter {dilation}. Must be an integer '
-      'in `(1, 2, 4)` or a pair of integers representing (stage 3 dilation, '
-      'stage 4 dilation).'
-    )
 
   # Stage 3
   y = resnest_module(
