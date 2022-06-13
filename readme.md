@@ -30,7 +30,7 @@ model = resnest.ResNeSt101(
   weights='imagenet',
   include_top=False,
   pooling=None,
-  dilated=4
+  dilation=4
 )
 ```
 
